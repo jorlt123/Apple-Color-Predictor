@@ -3,8 +3,8 @@
 Predictor v2: de los ~37.000 colores válidos, elige los 20 que Apple tiene más
 probabilidades de lanzar en sus próximos iPhone (años 2027+).
 
-Se apoya en apple_color_generator.py (conversiones de color e histórico) y añade
-más factores. Cada candidato se puntúa por separado para dos líneas de producto:
+Es un único archivo, sin dependencias externas (solo librería estándar).
+Cada candidato se puntúa por separado para dos líneas de producto:
 
   PRO       -> acabados metálicos (titanio/aluminio anodizado): oscuros o medios, croma contenido
   ESTÁNDAR  -> aluminio + vidrio teñido en masa: más claros, pasteles y algún tono vivo
@@ -27,10 +27,84 @@ import argparse
 import math
 import random
 
-from apple_color_generator import (
-    HISTORY, HUE_NAMES, gauss, hex_to_rgb, rgb_to_oklab, rgb_to_hex,
-    oklab_to_rgb_unclipped, lch_to_lab, in_gamut, lab_dist, _to_srgb,
-)
+# --------------------------------------------------------------------------
+# Histórico base (2019-2025) y utilidades de color (antes en apple_color_generator.py)
+# --------------------------------------------------------------------------
+HISTORY = [
+    ("2019 Midnight Green",   "#4E5851"),
+    ("2020 Pacific Blue",     "#2E4A5A"),
+    ("2021 Sierra Blue",      "#9BB5CE"),
+    ("2021 Alpine Green",     "#576856"),
+    ("2022 Deep Purple",      "#594F63"),
+    ("2023 Natural Titanium", "#B5B0A8"),
+    ("2023 Pink",             "#F2D4D1"),
+    ("2024 Desert Titanium",  "#BFA48F"),
+    ("2024 Ultramarine",      "#9AADF6"),
+    ("2024 Teal",             "#B0D4D2"),
+    ("2025 Cosmic Orange",    "#E77B3D"),
+    ("2025 Lavender",         "#CBBCDB"),
+    ("2025 Sage",             "#B7C5A8"),
+    ("2025 Mist Blue",        "#A9BDD0"),
+]
+
+
+def _to_lin(c):
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _to_srgb(c):
+    return 12.92 * c if c <= 0.0031308 else 1.055 * (c ** (1 / 2.4)) - 0.055
+
+
+def hex_to_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def rgb_to_hex(rgb):
+    return "#" + "".join(f"{max(0, min(255, round(c * 255))):02X}" for c in rgb)
+
+
+def rgb_to_oklab(rgb):
+    r, g, b = (_to_lin(c) for c in rgb)
+    l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+    m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
+    s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+    l_, m_, s_ = (math.copysign(abs(x) ** (1 / 3), x) for x in (l, m, s))
+    return (
+        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_,
+    )
+
+
+def oklab_to_rgb_unclipped(L, a, b):
+    l_ = L + 0.3963377774 * a + 0.2158037573 * b
+    m_ = L - 0.1055613458 * a - 0.0638541728 * b
+    s_ = L - 0.0894841775 * a - 1.2914855480 * b
+    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3
+    return (
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    )  # RGB lineal, sin recortar
+
+
+def lch_to_lab(L, C, h_deg):
+    h = math.radians(h_deg)
+    return L, C * math.cos(h), C * math.sin(h)
+
+
+def in_gamut(lin, eps=1e-4):
+    return all(-eps <= c <= 1 + eps for c in lin)
+
+
+def lab_dist(p, q):
+    return math.dist(p, q)
+
+
+def gauss(x, mu, sigma):
+    return math.exp(-0.5 * ((x - mu) / sigma) ** 2)
 
 NOW = 2026  # año del último lanzamiento conocido
 
